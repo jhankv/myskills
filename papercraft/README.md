@@ -27,6 +27,10 @@ npx skills add jakubkrehel/oklch-skill --skill oklch-skill
 - [Paper Desktop](https://paper.design) running with MCP server
 - [shadcn/ui](https://ui.shadcn.com) initialized in your project
 
+## Demo
+
+[See the moodboard and tests in Paper](https://app.paper.design/file/01KPHBT52YB8KHHA6AVWYT97XQ)
+
 ## How it works
 
 For a detailed guide on all commands, input modes, the design system architecture (colors, density, radius, typography), and frame conventions, see [docs/papercraft.md](docs/papercraft.md).
