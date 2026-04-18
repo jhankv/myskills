@@ -14,22 +14,32 @@ You put together a moodboard in Paper (reference images, drawn components, whate
 - `/papercraft component` / `/papercraft screen` — components or full screens in Paper, in code, or both. If it already exists, the agent applies only your changes
 - `/papercraft reset` — start from scratch
 
+## Install
+
+```
+npx skills add jhankv/myskills --skill papercraft
+npx skills add shadcn/ui --skill shadcn
+npx skills add jakubkrehel/oklch-skill --skill oklch-skill
+```
+
 ## Prerequisites
 
 - [Paper Desktop](https://paper.design) running with MCP server
 - [shadcn/ui](https://ui.shadcn.com) initialized in your project
-- Install required skills:
-  ```
-  npx skills add oklch-skill
-  npx skills add shadcn
-  ```
 
-## Install
+## How it works
 
-```
-npx skills add jhankevi/my-skills/papercraft
-```
+For a detailed guide on all commands, input modes, the design system architecture (colors, density, radius, typography), and frame conventions, see [docs/papercraft.md](docs/papercraft.md).
 
-## Stack
+## Built with
 
-Claude Code · Paper MCP · shadcn/ui · Next.js · Tailwind v4 · OKLCH
+- [Paper](https://paper.design) — design canvas connected via MCP
+- [shadcn/ui](https://ui.shadcn.com) — component library and theming foundation
+- [shadcn skill](https://github.com/shadcn/ui) — agent skill for component search, installation, and composition patterns
+- [oklch-skill](https://github.com/jakubkrehel/oklch-skill) — agent skill for OKLCH color conversion, palette generation, and contrast checking
+- [Tailwind CSS v4](https://tailwindcss.com) — utility-first CSS framework
+- [Claude Code](https://claude.ai) — AI agent runtime
+
+## License
+
+MIT
