@@ -1,0 +1,236 @@
+---
+name: papercraft
+description: "Connects Paper (design canvas) with shadcn/ui via MCP to generate themes and components. The designer writes instructions directly in Paper frames using 'Prompt:' text nodes, and this skill reads them to execute the work. Use this skill whenever the user mentions Paper, /papercraft, mood boards in Paper, DESIGN.md - pc frames, or wants to bridge design canvas with code. Also triggers when the user selects a frame in Paper and wants to generate or iterate on components or themes. Invoked as /papercraft with a sub-command: init, design.md, preview, component, or screen."
+user-invocable: true
+---
+
+# Papercraft
+
+Papercraft bridges the design canvas (Paper) with code. The designer communicates intent by writing directly in Paper frames — not in the chat. This skill reads those intentions via MCP and orchestrates theme generation and component creation using the oklch-skill and shadcn skill.
+
+## Usage
+
+The user invokes this skill as `/papercraft <sub-command>`:
+
+| Command | What it does | Selection required? |
+|---------|-------------|---------------------|
+| `/papercraft init` | Read mood board from Paper → generate brand theme → write to code + Paper | Yes — designer must select the mood board frame |
+| `/papercraft design.md [prompt]` | Iterate on the design system — adjust typography, density, radius, colors | No — auto-finds "DESIGN.md - pc" frame by name |
+| `/papercraft preview` | Render installed shadcn components in Paper with the current theme | No — reads components from code |
+| `/papercraft component` | Create or iterate on a component — from frame, name, or text prompt | Optional — frame, name, or description |
+| `/papercraft screen [prompt]` | Design a full page/view — from prompt or reference image in Paper | Optional — prompt or selection |
+| `/papercraft reset` | Remove DESIGN.md, restore globals.css to shadcn defaults, clean Paper frames | No |
+
+When invoked, read the argument passed to determine which sub-command to execute. If no argument is provided, ask the user which sub-command they want to run showing the table above.
+
+**Then read the corresponding reference file** for the full flow:
+
+| Command | Reference file |
+|---------|---------------|
+| `init` | `references/init.md` |
+| `design.md` | `references/design-md.md` |
+| `preview` | `references/preview.md` |
+| `component` | `references/component.md` |
+| `screen` | `references/screen.md` |
+| `reset` | `references/reset.md` |
+
+These files are in the same directory as this skill. Read only the one needed for the current command.
+
+### Selection rules
+
+Commands that require selection (`init`) will NOT search for frames on their own. If nothing is selected, tell the designer:
+> "Select the frame in Paper and run the command again."
+
+Commands that auto-find (`design.md`) search for a frame named "DESIGN.md - pc". If multiple matches are found, ask the designer which one to use.
+
+Commands that accept multiple inputs (`component`, `screen`) can work with a selected frame, a frame name, or just a text prompt.
+
+---
+
+## How Paper communicates with the agent
+
+Paper Desktop exposes an MCP server at `http://127.0.0.1:29979/mcp`. The available tools are:
+
+| Tool | Purpose |
+|------|---------|
+| `get_selection()` | Read the currently selected frame |
+| `get_children()` | Inspect what's inside a frame |
+| `get_node_info()` | Read text content from nodes |
+| `get_computed_styles()` | Detect colors and styles from drawn elements |
+| `get_screenshot()` | Visually analyze images, mood boards, or references |
+| `write_html()` | Write rendered content back into Paper |
+| `update_styles()` | Update styles on existing elements in Paper |
+| `create_artboard()` | Create new artboards in Paper |
+| `get_basic_info()` | Get file name, page, artboards, and fonts |
+
+The MCP always knows which page the user has open. If nothing is selected, it creates content on the active page.
+
+## How the designer communicates intent
+
+The designer writes instructions inside Paper frames as text nodes prefixed with `Prompt:`. This is the contract — the agent never assumes, it reads.
+
+```
+[Frame: "Design style"]
+  - Images (mood board references)
+  - Text: "Prompt: Create the visual style based on the moodboard
+            and use blue-500 from tailwind as the primary color"
+```
+
+### Detection logic for any frame
+
+1. Call `get_selection()` to identify the active frame
+2. Call `get_children()` to inspect its contents
+3. Classify what's inside:
+   - **Images found** → call `get_screenshot()` on the full frame to analyze visual references
+   - **Drawn elements found** → call `get_computed_styles()` to extract colors and properties
+   - **Text with `Prompt:` found** → read it as the designer's instruction via `get_node_info()`
+4. Combine all signals to understand the designer's intent
+
+---
+
+## Rules
+
+### Color system
+
+The color architecture is documented in `DESIGN.md` section 2 (generated by `init`). In short:
+
+- Brand scale (50→950) lives in `:root` as `--brand-*` variables, registered in `@theme inline` for Tailwind utility classes (`bg-brand-200`, `text-brand-700`, etc.)
+- `--primary` points to `var(--brand-500)` in light, `var(--brand-400)` in dark
+- `--primary-foreground` is calculated by oklch-skill using L > 0.6 threshold
+- shadcn manages hover, active, disabled, focus states internally — don't touch these
+
+**Primary override awareness:** The designer may override `--primary` to something other than brand (e.g., stone-900 for black buttons). When this happens, any component variant using `bg-primary` (Badge `default`, Progress indicator, Toggle pressed) will render the override color, NOT brand. Read DESIGN.md section 2 before generating code — if `--primary ≠ brand-500`, use brand utility classes (`bg-brand-500`, `text-brand-900`) for brand-colored elements instead of semantic `primary` variants.
+
+**Missing variant rule:** When translating from Paper to code, if Paper shows a visual treatment (e.g., a green-tinted "success" badge, a yellow "warning" badge) that doesn't map to any existing component variant, do NOT silently pick the closest variant. Instead, ask the designer: `[ Create new variant ]` vs `[ Use utility classes ]`. This prevents visual mismatches between Paper and code.
+
+### Naming convention — `- pc` suffix
+
+All frames generated by papercraft in Paper must have the `- pc` suffix in their name:
+
+```
+DESIGN.md - pc
+Button - pc
+TrackProgressCard - pc
+Sales Dashboard - pc
+```
+
+This suffix allows the agent to identify all papercraft-generated frames with a single `get_children()` call on root. Critical for `/papercraft design.md sync` and cascade flows.
+
+### Parent-child radius rule
+
+When a container (parent) wraps an element with border-radius (child), their radii are geometrically linked:
+
+```
+parentRadius = childRadius + parentPadding
+childRadius  = parentRadius - parentPadding
+If childRadius <= 0 → child uses radius 0 (straight corners)
+```
+
+Example: TabsList wraps TabsTrigger with 3px padding → TabsTrigger: `rounded-md`, TabsList: `rounded-lg` (one step up).
+
+Components where this rule applies: TabsList/TabsTrigger, ToggleGroup/ToggleItem, ButtonGroup/Button, Card/content sections, Select dropdown/options, InputGroup/Input+addon.
+
+**Applies to both code AND Paper.** When rendering in Paper via `write_html()`, the same radius formula must be applied.
+
+### Typography — use Tailwind's text scale only
+
+Never hardcode custom font sizes (13px, 11px, 15px, etc.). Use **only** Tailwind's standard text scale:
+
+| Class | Size |
+|-------|------|
+| `text-xs` | 12px (0.75rem) |
+| `text-sm` | 14px (0.875rem) |
+| `text-base` | 16px (1rem) |
+| `text-lg` | 18px (1.125rem) |
+| `text-xl` | 20px (1.25rem) |
+| `text-2xl` | 24px (1.5rem) |
+| `text-3xl` | 30px (1.875rem) |
+
+**Applies to both code AND Paper:**
+- **In code:** use Tailwind classes (`text-xs`, `text-sm`, `text-base`, etc.)
+- **In Paper (`write_html()`):** use the corresponding px values (`12px`, `14px`, `16px`, etc.) — never in-between values
+
+The mood board informs font **family** and **weight**, not sizes. Sizes always come from Tailwind's scale. The density-reference.md uses Tailwind text classes for the same reason.
+
+**Control text size follows density:**
+
+Interactive controls (buttons, inputs, selects, tabs triggers, dropdown items, menu items, toggle) use a text size determined by the density tier:
+
+| Density | Control text | Example styles |
+|---------|-------------|----------------|
+| **Compact** | `text-xs` (12px) | Mira, Lyra |
+| **Comfortable** | `text-sm` (14px) | Vega |
+| **Spacious** | `text-sm` (14px) | Maia |
+
+This ensures proportion: a `h-8` (32px) button looks right with 12px text, while `h-9` (36px) needs 14px.
+
+**Not affected:** Card body text (always `text-sm`), CardTitle/DialogTitle/SheetTitle (`text-base`), headings (own scale), Badge (always `text-xs`).
+
+### Rendering in Paper — resolve tokens to real values
+
+When drawing with `write_html()`, **never use CSS variable syntax** (`var(--brand-50)`) — Paper doesn't have the CSS context. Instead:
+
+1. **Read `globals.css`** to get the actual OKLCH values of all semantic tokens
+2. **Resolve variable references:** if `--accent: var(--brand-50)` and `--brand-50: oklch(0.990 0.015 114)`, use `oklch(0.990 0.015 114)` in Paper — not `oklch(0.99 0 0)` (plain gray)
+3. **Match exactly:** every color in Paper must match its code counterpart. If `--muted` has chroma > 0 in globals.css (brand-tinted), it must have the same chroma in Paper
+
+This prevents the visual disconnect where Paper shows plain grays but the running app shows brand-tinted neutrals.
+
+### Density system
+
+Density is applied via direct Tailwind classes in component files — no CSS variables for spacing. The reference data lives in `density-reference.md` (same directory as this skill).
+
+- **3 tiers:** Compact, Comfortable, Spacious
+- **Compact vs Comfortable:** different control heights (h-8 vs h-9), container padding (p-4 vs p-6), menu item spacing
+- **Comfortable vs Spacious:** same control heights (h-9), same container padding (p-6) — differ in menu items, table rows, and table cells
+- **Radius is independent** — set via `--radius` CSS variable, not tied to density
+- **Components unaffected by density:** Checkbox, Radio, Switch, Badge, Separator (always same size)
+- **To change density:** re-run the codemod on `components/ui/*.tsx` using the new tier's values from density-reference.md
+
+**Skip-codemod rule:** Each shadcn style (Nova, Mira, Lyra, Vega, Maia, Luma) ships with a built-in density, radius, and pill-buttons setting. During `init`, compare the detected values with the style's defaults — skip the codemod for any axis that already matches. See `density-reference.md` → "shadcn Style Defaults" for the full mapping. Each axis (density, radius, pill-buttons) is evaluated independently.
+
+### Paper frame structure
+
+All commands that draw in Paper (`preview`, `component`, `screen`) must use this nested structure:
+
+```
+[Frame contenedor: "Name - pc"]
+  |-- [Frame: Visual]   <- the rendered output
+  +-- [Frame: Info]     <- technical notes (props, variants, composition, prompt, changes)
+```
+
+- Visual and info are **separate frames** — never mix technical text inside the visual
+- When a reference image is provided, the visual frame must **respect the reference layout**
+- The reference dictates structure; DESIGN.md dictates style
+- The `- pc` suffix goes on the container frame name, not on the inner frames
+
+### What goes in Paper vs what goes in code
+
+| Paper | Code |
+|-------|------|
+| "DESIGN.md - pc" frame (visual palette + chart colors) | `DESIGN.md` file + `globals.css` with CSS variables |
+| Component in default state | Complete component with all states and variants |
+| Description of available variants | Full implementation with props |
+| Screen layout with realistic mock data | Page file with component imports + TypeScript types |
+
+Paper is the **decision canvas**. Code is the **complete implementation**.
+
+### Reading order
+
+The reading order depends on the output destination (Paper vs Code vs Both). See the specific command reference file for details. General principle:
+
+- **`init`** → reads mood board/code + writes everything (DESIGN.md + globals.css + codemod + Paper frame). No Paper-only mode — code and Paper are always in sync from the start.
+- **Paper output (design.md, preview)** → read `DESIGN.md` + `globals.css` (colors from globals.css are source of truth)
+- **Paper output (component, screen)** → read `DESIGN.md` + `density-reference.md` + `globals.css` (sizing from density-reference, colors from globals.css)
+- **Code output** → read `DESIGN.md` + `density-reference.md` + `globals.css` + `components/ui/`
+- **Both** → read everything
+
+**Why globals.css for Paper too:** `globals.css` is the runtime source of truth for colors. DESIGN.md is a convenient summary for density, radius, typography, and project context — but for color tokens, always read the resolved values from `globals.css` to ensure Paper matches code exactly. This prevents stale or incorrectly generated DESIGN.md values from propagating into Paper designs.
+
+### Integration with other skills
+
+- **oklch-skill** → call it for: color conversion, palette generation (50→950), contrast checking, gamut clamping.
+- **shadcn skill** → call it for: component search, installation, documentation lookup, composition patterns, variant conventions.
+- **Paper MCP** → the bridge to the design canvas. All reads from and writes to Paper go through MCP tools.
+
+Papercraft is the orchestrator. It knows *when* and *why* to call each skill, but delegates the *how* to the specialists.
